@@ -1,0 +1,591 @@
+{
+  "id": "b24LeadsFromSite",
+  "name": "Форма сайта → Битрикс24 без дублей",
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "nodes": [
+    {
+      "id": "7b52309e-9c14-4158-83ed-2da16e7a177b",
+      "name": "Заявка с сайта",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "lead-to-b24",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "webhookId": "592a4631-396d-43ff-8fb4-c2a963b77ed6"
+    },
+    {
+      "id": "ecc4b810-293b-4699-bf44-014104fbd0da",
+      "name": "Проверка и нормализация",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "parameters": {
+        "jsCode": "// Телефон в любом формате → +7XXXXXXXXXX (то же правило, что crm.normalize_phone в боте)\nconst b = $input.first().json.body || {};\nconst raw = String(b.phone ?? '');\nconst d = raw.replace(/\\D/g, '');\nlet phone = null;\nif (d.length === 11 && '78'.includes(d[0])) phone = '+7' + d.slice(1);\nelse if (d.length === 10 && d[0] === '9') phone = '+7' + d;\nelse if (raw.trim().startsWith('+') && d.length >= 11 && d.length <= 15 && !d.startsWith('7')) phone = '+' + d;\nconst need = String(b.need ?? '').trim().slice(0, 1000) || 'Заявка с сайта';\nreturn [{ json: { name: String(b.name ?? '').trim().slice(0, 60) || 'Без имени', phone, need } }];"
+      }
+    },
+    {
+      "id": "4ff5ab0a-65ef-4643-9260-583cc52292ac",
+      "name": "Телефон верный?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ !!$json.phone }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "b36302c0-c562-428b-a9a3-5ae2bae09467",
+      "name": "Ответ 422",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        180
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', error: 'Неверный номер телефона' }) }}",
+        "options": {
+          "responseCode": 422
+        }
+      }
+    },
+    {
+      "id": "5a882c82-502b-497d-88d2-078a3e360e7e",
+      "name": "Режим CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.B24_WEBHOOK }}crm.settings.mode.get.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({}) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "08e2bf32-f9de-4e99-862d-327d41651e2e",
+      "name": "Простой режим?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        880,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ Number($json.result) }}",
+              "operator": {
+                "type": "number",
+                "operation": "equals"
+              },
+              "rightValue": 2
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9604e218-8091-486b-a676-38fc157f980f",
+      "name": "Ответ 501",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1100,
+        180
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'error', error: 'Портал в классическом режиме (лиды): этот сценарий для простого режима — используйте ветку лидов (bitrix24-leads/crm.py)' }) }}",
+        "options": {
+          "responseCode": 501
+        }
+      }
+    },
+    {
+      "id": "be974e83-5a71-48c7-b816-12481d871b54",
+      "name": "Поиск клиента по телефону",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1100,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.B24_WEBHOOK }}crm.duplicate.findbycomm.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ type: 'PHONE', values: [$('Проверка и нормализация').item.json.phone] }) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "2f0812e0-b6e3-4c75-8299-dc669bf81de8",
+      "name": "Клиент известен?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1320,
+        0
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ Array.isArray($json.result?.CONTACT) && $json.result.CONTACT.length > 0 }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "47177b6e-7385-400c-be72-9e0c236ce0ec",
+      "name": "Открытые сделки клиента",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        -120
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.B24_WEBHOOK }}crm.deal.list.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ filter: { CONTACT_ID: Math.max(...$('Поиск клиента по телефону').item.json.result.CONTACT), STAGE_SEMANTIC_ID: 'P' }, order: { ID: 'DESC' }, select: ['ID'] }) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "bb03aabb-e732-4287-a831-4b95de304479",
+      "name": "Есть открытая сделка?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1760,
+        -120
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ ($json.result || []).length > 0 }}",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "9763fef4-057a-4887-9cd9-0d85706852fd",
+      "name": "Комментарий в открытую сделку",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        -240
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.B24_WEBHOOK }}crm.timeline.comment.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { ENTITY_ID: $json.result[0].ID, ENTITY_TYPE: 'deal', COMMENT: 'Повторная заявка (сайт):\\n' + $('Проверка и нормализация').item.json.need } }) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "7e9ca92e-eaff-4e61-85c0-76b370e86e91",
+      "name": "Ответ: дополнили открытую",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        -240
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'attached', deal_id: Number($('Открытые сделки клиента').item.json.result[0].ID), url: $env.B24_WEBHOOK.split('/rest/')[0] + '/crm/deal/details/' + $('Открытые сделки клиента').item.json.result[0].ID + '/' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "f0b08018-f078-4f2b-8dcf-70b2f736881b",
+      "name": "Сделка: повторное обращение",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1980,
+        -40
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.B24_WEBHOOK }}crm.deal.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { TITLE: 'Повторное обращение: ' + $('Проверка и нормализация').item.json.need.slice(0, 60), CONTACT_ID: Math.max(...$('Поиск клиента по телефону').item.json.result.CONTACT), SOURCE_ID: 'WEB', COMMENTS: $('Проверка и нормализация').item.json.need, UF_CRM_NEED: $('Проверка и нормализация').item.json.need } }) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "d16b2989-5019-4c46-a504-98aa203435fb",
+      "name": "Ответ: повторное обращение",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        2200,
+        -40
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'repeat', deal_id: Number($json.result), url: $env.B24_WEBHOOK.split('/rest/')[0] + '/crm/deal/details/' + $json.result + '/' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "51dcb06a-5b07-4e4f-9faf-7dacb508f74a",
+      "name": "Новый контакт",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.B24_WEBHOOK }}crm.contact.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { NAME: $('Проверка и нормализация').item.json.name, PHONE: [{ VALUE: $('Проверка и нормализация').item.json.phone, VALUE_TYPE: 'WORK' }], SOURCE_ID: 'WEB' } }) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "e97f869a-c26a-44fa-aeba-b8dd12f61c8a",
+      "name": "Новая сделка",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1760,
+        140
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.B24_WEBHOOK }}crm.deal.add.json",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ fields: { TITLE: 'Заявка с сайта: ' + $('Проверка и нормализация').item.json.need.slice(0, 60), CONTACT_ID: Number($json.result), SOURCE_ID: 'WEB', COMMENTS: $('Проверка и нормализация').item.json.need, UF_CRM_NEED: $('Проверка и нормализация').item.json.need } }) }}",
+        "options": {
+          "timeout": 8000
+        }
+      },
+      "retryOnFail": true,
+      "maxTries": 5,
+      "waitBetweenTries": 1000
+    },
+    {
+      "id": "91efb2a8-2211-4d95-bf9c-86b3dbb46fb0",
+      "name": "Ответ: новая заявка",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1980,
+        140
+      ],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ status: 'created', deal_id: Number($json.result), url: $env.B24_WEBHOOK.split('/rest/')[0] + '/crm/deal/details/' + $json.result + '/' }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Заявка с сайта": {
+      "main": [
+        [
+          {
+            "node": "Проверка и нормализация",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Проверка и нормализация": {
+      "main": [
+        [
+          {
+            "node": "Телефон верный?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Телефон верный?": {
+      "main": [
+        [
+          {
+            "node": "Режим CRM",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ответ 422",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Режим CRM": {
+      "main": [
+        [
+          {
+            "node": "Простой режим?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Простой режим?": {
+      "main": [
+        [
+          {
+            "node": "Поиск клиента по телефону",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Ответ 501",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Поиск клиента по телефону": {
+      "main": [
+        [
+          {
+            "node": "Клиент известен?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Клиент известен?": {
+      "main": [
+        [
+          {
+            "node": "Открытые сделки клиента",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Новый контакт",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Открытые сделки клиента": {
+      "main": [
+        [
+          {
+            "node": "Есть открытая сделка?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Есть открытая сделка?": {
+      "main": [
+        [
+          {
+            "node": "Комментарий в открытую сделку",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Сделка: повторное обращение",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Комментарий в открытую сделку": {
+      "main": [
+        [
+          {
+            "node": "Ответ: дополнили открытую",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Сделка: повторное обращение": {
+      "main": [
+        [
+          {
+            "node": "Ответ: повторное обращение",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Новый контакт": {
+      "main": [
+        [
+          {
+            "node": "Новая сделка",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Новая сделка": {
+      "main": [
+        [
+          {
+            "node": "Ответ: новая заявка",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  }
+}

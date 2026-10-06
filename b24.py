@@ -16,9 +16,10 @@ class B24Error(Exception):
 
 
 class B24:
-    def __init__(self, webhook: str, retries: int = 3):
+    def __init__(self, webhook: str, retries: int = 3, resolver=None):
         self.webhook = webhook.rstrip("/") + "/"
         self.retries = retries
+        self.resolver = resolver
         self._session: aiohttp.ClientSession | None = None
 
     @property
@@ -27,7 +28,12 @@ class B24:
 
     async def call(self, method: str, params: dict | None = None):
         if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20))
+            # У облачного Битрикс24 десяток IP-адресов, и часть из них может быть недоступна из сети клиента
+            # (из домашнего интернета не отвечал 1 из 13). sock_connect=4: адрес не ответил за 4 с — aiohttp сам
+            # пробует следующий адрес из DNS, а не висит до общего таймаута.
+            self._session = aiohttp.ClientSession(
+                timeout=aiohttp.ClientTimeout(total=30, sock_connect=4),
+                connector=aiohttp.TCPConnector(resolver=self.resolver) if self.resolver else None)
         for attempt in range(self.retries + 1):
             async with self._session.post(f"{self.webhook}{method}.json", json=params or {}) as r:
                 data = await r.json(content_type=None)
